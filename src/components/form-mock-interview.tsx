@@ -26,9 +26,21 @@ import {
   addDoc,
   collection,
   doc,
+  deleteDoc,
   serverTimestamp,
   updateDoc,
 } from "firebase/firestore";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "./ui/alert-dialog";
 import { db } from "@/config/firebase.config";
 
 interface FormMockInterviewProps {
@@ -72,8 +84,32 @@ export const FormMockInterview = ({ initialData }: FormMockInterviewProps) => {
 
   const { isValid, isSubmitting } = form.formState;
   const [loading, setLoading] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const navigate = useNavigate();
   const { userId } = useAuth();
+
+  const onDelete = async () => {
+    if (!initialData) return; // Guard clause
+
+    try {
+      setIsDeleting(true);
+
+      const docRef = doc(db, "interviews", initialData.id);
+      await deleteDoc(docRef);
+
+      toast.success("Interview Deleted", {
+        description: "The mock interview has been successfully removed.",
+      });
+      navigate("/generate", { replace: true });
+    } catch (error) {
+      console.error("Error deleting document: ", error);
+      toast.error("Deletion Failed", {
+        description: "Something went wrong. Please try again later.",
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const title = initialData?.position
     ? initialData?.position
@@ -198,9 +234,36 @@ export const FormMockInterview = ({ initialData }: FormMockInterviewProps) => {
         <Headings title={title} isSubHeading />
 
         {initialData && (
-          <Button size={"icon"} variant={"ghost"}>
-            <Trash2 className="min-w-4 min-h-4 text-red-500" />
-          </Button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                size={"icon"}
+                variant={"ghost"}
+                disabled={loading || isDeleting}
+              >
+                <Trash2 className="min-w-4 min-h-4 text-red-500" />
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This action cannot be undone. This will permanently delete
+                  this mock interview and all of its data.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={onDelete}
+                  disabled={isDeleting}
+                  className="bg-red-600 hover:bg-red-700"
+                >
+                  {isDeleting ? <Loader className="animate-spin" /> : "Delete"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         )}
       </div>
 
