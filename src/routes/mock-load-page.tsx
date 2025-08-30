@@ -86,7 +86,7 @@ export const MockLoadPage = () => {
             <br />
             <span className="font-medium">Note:</span> Your video is{" "}
             <strong>never recorded</strong>. You can disable your webcam at any
-            time.
+            time, but we recommend keeping it on to simulate a real interview experience.
           </AlertDescription>
         </div>
       </Alert>

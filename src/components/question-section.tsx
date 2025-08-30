@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { TooltipButton } from "./tooltip-button";
@@ -10,6 +10,7 @@ interface QuestionSectionProps {
 }
 
 export const QuestionSection = ({ questions }: QuestionSectionProps) => {
+  const [activeQuestion, setActiveQuestion] = useState(questions[0]?.question);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isWebCam, setIsWebCam] = useState(false);
 
@@ -17,31 +18,73 @@ export const QuestionSection = ({ questions }: QuestionSectionProps) => {
     useState<SpeechSynthesisUtterance | null>(null);
 
   const handlePlayQuestion = (qst: string) => {
-    if (isPlaying && currentSpeech) {
-      // stop the speech if already playing
+    if (isPlaying && currentSpeech?.text === qst) {
       window.speechSynthesis.cancel();
       setIsPlaying(false);
       setCurrentSpeech(null);
-    } else {
-      if ("speechSynthesis" in window) {
-        const speech = new SpeechSynthesisUtterance(qst);
-        window.speechSynthesis.speak(speech);
-        setIsPlaying(true);
-        setCurrentSpeech(speech);
+      return;
+    }
 
-        // handle the speech end
-        speech.onend = () => {
-          setIsPlaying(false);
-          setCurrentSpeech(null);
-        };
-      }
+    if (currentSpeech) {
+      window.speechSynthesis.cancel();
+    }
+
+    if ("speechSynthesis" in window) {
+      const speech = new SpeechSynthesisUtterance(qst);
+      window.speechSynthesis.speak(speech);
+      setIsPlaying(true);
+      setCurrentSpeech(speech);
+      speech.onend = () => {
+        setIsPlaying(false);
+        setCurrentSpeech(null);
+      };
     }
   };
+
+  const handleNextQuestion = () => {
+    const currentIndex = questions.findIndex(
+      (q) => q.question === activeQuestion
+    );
+    if (currentIndex < questions.length - 1) {
+      const nextQuestionValue = questions[currentIndex + 1].question;
+      setActiveQuestion(nextQuestionValue);
+    } else {
+      console.log("All questions have been answered!");
+    }
+  };
+
+  useEffect(() => {
+    if (activeQuestion) {
+      handlePlayQuestion(activeQuestion);
+    }
+  }, [activeQuestion]);
+
+  // ✨ ADDED: This useEffect checks for camera permission on component load
+  useEffect(() => {
+    const checkCameraPermission = async () => {
+      try {
+        // Query the browser for the current camera permission status
+        const permissionStatus = await navigator.permissions.query({
+          name: "camera",
+        });
+
+        // If permission is already granted, set the webcam state to true
+        if (permissionStatus.state === "granted") {
+          setIsWebCam(true);
+        }
+      } catch (error) {
+        console.error("Could not check camera permission:", error);
+      }
+    };
+
+    checkCameraPermission();
+  }, []); // The empty array ensures this runs only once when the component mounts
 
   return (
     <div className="w-full min-h-96 border rounded-md p-4">
       <Tabs
-        defaultValue={questions[0]?.question}
+        value={activeQuestion}
+        onValue-change={setActiveQuestion}
         className="w-full space-y-12"
         orientation="vertical"
       >
@@ -83,6 +126,7 @@ export const QuestionSection = ({ questions }: QuestionSectionProps) => {
               question={tab}
               isWebCam={isWebCam}
               setIsWebCam={setIsWebCam}
+              onSaveSuccess={handleNextQuestion}
             />
           </TabsContent>
         ))}

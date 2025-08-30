@@ -79,9 +79,10 @@ export const MockInterviewPage = () => {
               responses with the ideal answers.
               <br />
               <br />
-              <strong>Note:</strong>{" "}
-              <span className="font-medium">Your video is never recorded.</span>{" "}
-              You can disable the webcam anytime if preferred.
+              <strong>Note:</strong> <span className="font-medium">Note:</span>{" "}
+              Your video is <strong>never recorded</strong>. You can disable
+              your webcam at any time, but we recommend keeping it on to
+              simulate a real interview experience.
             </AlertDescription>
           </div>
         </Alert>

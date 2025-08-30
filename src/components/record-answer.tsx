@@ -1,4 +1,3 @@
-import { useAuth } from "@clerk/clerk-react";
 import {
   CircleStop,
   Loader,
@@ -9,15 +8,13 @@ import {
   VideoOff,
   WebcamIcon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+// ✨ ADDED: useRef and useCallback for the new logic
+import { useEffect, useState, useRef, useCallback } from "react";
 import useSpeechToText from "react-hook-speech-to-text";
 import type { ResultType } from "react-hook-speech-to-text";
 import { useParams } from "react-router-dom";
 import WebCam from "react-webcam";
-import { TooltipButton } from "./tooltip-button";
-import { toast } from "sonner";
-import { chatSession } from "@/srcipts";
-import { SaveModal } from "./save-modal";
+import { useAuth } from "@clerk/clerk-react";
 import {
   addDoc,
   collection,
@@ -26,12 +23,22 @@ import {
   serverTimestamp,
   where,
 } from "firebase/firestore";
+import { toast } from "sonner";
+
 import { db } from "@/config/firebase.config";
+import { chatSession } from "@/srcipts";
+import { Button } from "./ui/button";
+import { Label } from "@radix-ui/react-label";
+import { Switch } from "./ui/switch";
+import { Textarea } from "./ui/textarea";
+import { SaveModal } from "./save-modal";
+import { TooltipButton } from "./tooltip-button";
 
 interface RecordAnswerProps {
   question: { question: string; answer: string };
   isWebCam: boolean;
   setIsWebCam: (value: boolean) => void;
+  onSaveSuccess: () => void;
 }
 
 interface AIResponse {
@@ -43,6 +50,7 @@ export const RecordAnswer = ({
   question,
   isWebCam,
   setIsWebCam,
+  onSaveSuccess,
 }: RecordAnswerProps) => {
   const {
     interimResult,
@@ -60,43 +68,16 @@ export const RecordAnswer = ({
   const [aiResult, setAiResult] = useState<AIResponse | null>(null);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [inputMode, setInputMode] = useState<"speech" | "text">("speech");
 
   const { userId } = useAuth();
   const { interviewId } = useParams();
-
-  const recordUserAnswer = async () => {
-    if (isRecording) {
-      stopSpeechToText();
-
-      if (userAnswer?.length < 30) {
-        toast.error("Error", {
-          description: "Your answer should be more than 30 characters",
-        });
-
-        return;
-      }
-
-      //   ai result
-      const aiResult = await generateResult(
-        question.question,
-        question.answer,
-        userAnswer
-      );
-
-      setAiResult(aiResult);
-    } else {
-      startSpeechToText();
-    }
-  };
+  // ✨ ADDED: A ref to track the previous recording state
+  const wasRecordingRef = useRef(isRecording);
 
   const cleanJsonResponse = (responseText: string) => {
-    // Step 1: Trim any surrounding whitespace
     let cleanText = responseText.trim();
-
-    // Step 2: Remove any occurrences of "json" or code block symbols (``` or `)
     cleanText = cleanText.replace(/(json|```|`)/g, "");
-
-    // Step 3: Parse the clean JSON text into an array of objects
     try {
       return JSON.parse(cleanText);
     } catch (error) {
@@ -104,41 +85,90 @@ export const RecordAnswer = ({
     }
   };
 
-  const generateResult = async (
-    qst: string,
-    qstAns: string,
-    userAns: string
-  ): Promise<AIResponse> => {
-    setIsAiGenerating(true);
-    const prompt = `
-      Question: "${qst}"
-      User Answer: "${userAns}"
-      Correct Answer: "${qstAns}"
-      Please compare the user's answer to the correct answer, and provide a rating (from 1 to 10) based on answer quality, and offer feedback for improvement.
-      Return the result in JSON format with the fields "ratings" (number) and "feedback" (string).
-    `;
+  // ✨ MODIFIED: Wrapped generateResult in useCallback for optimization
+  const generateResult = useCallback(
+    async (
+      qst: string,
+      qstAns: string,
+      userAns: string
+    ): Promise<AIResponse> => {
+      setIsAiGenerating(true);
+      const prompt = `
+        Question: "${qst}"
+        User Answer: "${userAns}"
+        Correct Answer: "${qstAns}"
+        Please compare the user's answer to the correct answer, and provide a rating (from 1 to 10) based on answer quality, and offer feedback for improvement.
+        Return the result in JSON format with the fields "ratings" (number) and "feedback" (string).
+      `;
 
-    try {
-      const aiResult = await chatSession.sendMessage(prompt);
+      try {
+        const aiResult = await chatSession.sendMessage(prompt);
+        const parsedResult: AIResponse = cleanJsonResponse(
+          aiResult.response.text()
+        );
+        return parsedResult;
+      } catch (error) {
+        console.log(error);
+        toast("Error", {
+          description: "An error occurred while generating feedback.",
+        });
+        return { ratings: 0, feedback: "Unable to generate feedback" };
+      } finally {
+        setIsAiGenerating(false);
+      }
+    },
+    [] // This function doesn't have reactive dependencies, so the array is empty
+  );
 
-      const parsedResult: AIResponse = cleanJsonResponse(
-        aiResult.response.text()
-      );
-      return parsedResult;
-    } catch (error) {
-      console.log(error);
-      toast("Error", {
-        description: "An error occurred while generating feedback.",
+  // ✨ MODIFIED: Wrapped getAIFeedback in useCallback for stable reference in useEffect
+  const getAIFeedback = useCallback(async () => {
+    if (isRecording) {
+      stopSpeechToText();
+    }
+
+    if (inputMode === "speech" && userAnswer?.length < 30) {
+      toast.error("Error", {
+        description: "Your answer should be more than 30 characters",
       });
-      return { ratings: 0, feedback: "Unable to generate feedback" };
-    } finally {
-      setIsAiGenerating(false);
+      return;
+    }
+
+    const result = await generateResult(
+      question.question,
+      question.answer,
+      userAnswer
+    );
+    setAiResult(result);
+  }, [isRecording, userAnswer, question, stopSpeechToText, generateResult]);
+
+  // ✨ ADDED: This effect automatically triggers AI feedback when recording stops in speech mode
+  useEffect(() => {
+    // Check if it *was* recording and now it is *not*, and we are in speech mode
+    if (wasRecordingRef.current && !isRecording && inputMode === "speech") {
+      // Ensure there's an answer to process before calling the API
+      if (userAnswer && userAnswer.trim().length > 0) {
+        getAIFeedback();
+      }
+    }
+    // Update the ref to the current recording state for the next render
+    wasRecordingRef.current = isRecording;
+  }, [isRecording, inputMode, userAnswer, getAIFeedback]);
+
+  const toggleRecording = () => {
+    if (isRecording) {
+      stopSpeechToText();
+      // NOTE: We don't call getAIFeedback here directly. The useEffect above handles it.
+    } else {
+      startSpeechToText();
     }
   };
 
   const recordNewAnswer = () => {
     setUserAnswer("");
-    stopSpeechToText();
+    setAiResult(null); // Also clear the previous AI result
+    if (isRecording) {
+      stopSpeechToText();
+    }
     startSpeechToText();
   };
 
@@ -146,31 +176,25 @@ export const RecordAnswer = ({
     setLoading(true);
 
     if (!aiResult) {
+      setLoading(false);
       return;
     }
 
     const currentQuestion = question.question;
     try {
-      // query the firbase to check if the user answer already exists for this question
-
       const userAnswerQuery = query(
         collection(db, "userAnswers"),
         where("userId", "==", userId),
         where("question", "==", currentQuestion)
       );
-
       const querySnap = await getDocs(userAnswerQuery);
 
-      // if the user already answerd the question dont save it again
       if (!querySnap.empty) {
-        console.log("Query Snap Size", querySnap.size);
         toast.info("Already Answered", {
           description: "You have already answered this question",
         });
         return;
       } else {
-        // save the user answer
-
         await addDoc(collection(db, "userAnswers"), {
           mockIdRef: interviewId,
           question: question.question,
@@ -183,19 +207,27 @@ export const RecordAnswer = ({
         });
 
         toast("Saved", { description: "Your answer has been saved.." });
-      }
 
-      setUserAnswer("");
-      stopSpeechToText();
+        onSaveSuccess();
+        setUserAnswer("");
+        setAiResult(null);
+        if (isRecording) {
+          stopSpeechToText();
+        }
+      }
     } catch (error) {
       toast("Error", {
-        description: "An error occurred while generating feedback.",
+        description: "An error occurred while saving your answer.",
       });
       console.log(error);
     } finally {
       setLoading(false);
-      setOpen(!open);
+      setOpen(false);
     }
+  };
+
+  const handleInputModeChange = (isChecked: boolean) => {
+    setInputMode(isChecked ? "text" : "speech");
   };
 
   useEffect(() => {
@@ -208,85 +240,121 @@ export const RecordAnswer = ({
   }, [results]);
 
   return (
-    <div className="w-full flex flex-col items-center gap-8 mt-4">
-      {/* save modal */}
-      <SaveModal
-        isOpen={open}
-        onClose={() => setOpen(false)}
-        onConfirm={saveUserAnswer}
-        loading={loading}
-      />
+    <div className="w-full flex flex-col md:flex-row items-start gap-6 mt-4">
+      {/* Camera & Controls */}
+      <div className="md:w-2/5 w-full flex flex-col items-center gap-4">
+        <SaveModal
+          isOpen={open}
+          onClose={() => setOpen(false)}
+          onConfirm={saveUserAnswer}
+          loading={loading}
+        />
 
-      <div className="w-full h-[400px] md:w-96 flex flex-col items-center justify-center border p-4 bg-gray-50 rounded-md">
-        {isWebCam ? (
-          <WebCam
-            onUserMedia={() => setIsWebCam(true)}
-            onUserMediaError={() => setIsWebCam(false)}
-            className="w-full h-full object-cover rounded-md"
+        <div className="w-full h-[400px] md:w-96 flex flex-col items-center justify-center border p-4 bg-gray-50 rounded-md">
+          {isWebCam ? (
+            <WebCam
+              onUserMedia={() => setIsWebCam(true)}
+              onUserMediaError={() => setIsWebCam(false)}
+              className="w-full h-full object-cover rounded-md"
+            />
+          ) : (
+            <WebcamIcon className="min-w-24 min-h-24 text-muted-foreground" />
+          )}
+        </div>
+
+        <div className="flex justify-center gap-3">
+          <TooltipButton
+            content={isWebCam ? "Turn Off" : "Turn On"}
+            icon={isWebCam ? <VideoOff /> : <Video />}
+            onClick={() => setIsWebCam(!isWebCam)}
           />
-        ) : (
-          <WebcamIcon className="min-w-24 min-h-24 text-muted-foreground" />
-        )}
+
+          <TooltipButton
+            content={isRecording ? "Stop Recording" : "Start Recording"}
+            icon={isRecording ? <CircleStop /> : <Mic />}
+            onClick={toggleRecording}
+            disbaled={inputMode === "text"}
+          />
+
+          <TooltipButton
+            content="Record Again"
+            icon={<RefreshCw />}
+            onClick={recordNewAnswer}
+            disbaled={inputMode === "text"}
+          />
+
+          <TooltipButton
+            content="Save Result"
+            icon={
+              isAiGenerating ? ( 
+                <Loader className="min-w-5 min-h-5 animate-spin" />
+              ) : (
+                <Save className="min-w-5 min-h-5" />
+              )
+            }
+            onClick={() => setOpen(!open)}
+            disbaled={!aiResult}
+          />
+        </div>
       </div>
 
-      <div className="flex itece justify-center gap-3">
-        <TooltipButton
-          content={isWebCam ? "Turn Off" : "Turn On"}
-          icon={
-            isWebCam ? (
-              <VideoOff className="min-w-5 min-h-5" />
-            ) : (
-              <Video className="min-w-5 min-h-5" />
-            )
-          }
-          onClick={() => setIsWebCam(!isWebCam)}
-        />
+      {/* Answer */}
+      <div className="md:w-3/5 w-full">
+        <div className="w-full h-120 p-4 border rounded-md bg-gray-50 overflow-y-auto">
+          <div className="flex items-center space-x-3 mb-4">
+            <Label
+              htmlFor="input-mode-toggle"
+              className={inputMode === "speech" ? "font-bold" : ""}
+            >
+              Speech
+            </Label>
+            <Switch
+              id="input-mode-toggle"
+              checked={inputMode === "text"}
+              onCheckedChange={handleInputModeChange}
+            />
+            <Label
+              htmlFor="input-mode-toggle"
+              className={inputMode === "text" ? "font-bold" : ""}
+            >
+              Text
+            </Label>
+          </div>
 
-        <TooltipButton
-          content={isRecording ? "Stop Recording" : "Start Recording"}
-          icon={
-            isRecording ? (
-              <CircleStop className="min-w-5 min-h-5" />
-            ) : (
-              <Mic className="min-w-5 min-h-5" />
-            )
-          }
-          onClick={recordUserAnswer}
-        />
+          <h2 className="text-lg font-semibold">Your Answer:</h2>
 
-        <TooltipButton
-          content="Record Again"
-          icon={<RefreshCw className="min-w-5 min-h-5" />}
-          onClick={recordNewAnswer}
-        />
-
-        <TooltipButton
-          content="Save Result"
-          icon={
-            isAiGenerating ? (
-              <Loader className="min-w-5 min-h-5 animate-spin" />
-            ) : (
-              <Save className="min-w-5 min-h-5" />
-            )
-          }
-          onClick={() => setOpen(!open)}
-          disbaled={!aiResult}
-        />
-      </div>
-
-      <div className="w-full mt-4 p-4 border rounded-md bg-gray-50">
-        <h2 className="text-lg font-semibold">Your Answer:</h2>
-
-        <p className="text-sm mt-2 text-gray-700 whitespace-normal">
-          {userAnswer || "Start recording to see your ansewer here"}
-        </p>
-
-        {interimResult && (
-          <p className="text-sm text-gray-500 mt-2">
-            <strong>Current Speech:</strong>
-            {interimResult}
-          </p>
-        )}
+          {inputMode === "speech" ? (
+            <>
+              <p className="text-sm mt-2 text-gray-700 whitespace-pre-line">
+                {userAnswer || "Start recording to see your answer here."}
+              </p>
+              {interimResult && (
+                <p className="text-sm text-gray-500 mt-2">
+                  <strong>Listening: </strong>
+                  {interimResult}
+                </p>
+              )}
+            </>
+          ) : (
+            <>
+              <Textarea
+                value={userAnswer}
+                onChange={(e) => setUserAnswer(e.target.value)}
+                placeholder="Type your answer here..."
+                className="mt-2 h-64 bg-white"
+              />
+              <div className="w-full flex justify-center mt-4">
+                <Button
+                  onClick={getAIFeedback}
+                  size="sm"
+                  disabled={isAiGenerating}
+                >
+                  {isAiGenerating ? "Submitting..." : "Submit"}
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
