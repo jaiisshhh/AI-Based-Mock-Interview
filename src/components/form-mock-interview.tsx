@@ -147,12 +147,12 @@ export const FormMockInterview = ({ initialData }: FormMockInterviewProps) => {
 
   const generateAiResponse = async (data: FormData) => {
     const prompt = `
-        As an experienced prompt engineer, generate a JSON array containing 5 technical interview questions along with detailed answers based on the following job information. Each object in the array should have the fields "question" and "answer", formatted as follows:
+        As an experienced prompt engineer, generate a JSON array containing exactly 7 interview questions along with detailed answers based on the following job information. Each object in the array should have the fields "question" and "answer".
 
-        [
-          { "question": "<Question text>", "answer": "<Answer text>" },
-          ...
-        ]
+        The structure of the 7 questions must be as follows:
+        1.  **One Introductory Question:** A general question to start the interview (e.g., "Tell me about yourself and your experience with ${data?.techStack}").
+        2.  **Five Technical Questions:** These questions should assess skills in ${data?.techStack} development, best practices, problem-solving, and experience handling complex requirements, tailored to a candidate with ${data?.experience} years of experience.
+        3.  **One Behavioral Question:** A question to assess teamwork, problem-solving under pressure, or handling workplace scenarios (e.g., "Describe a challenging project you worked on and how you overcame the obstacles.").
 
         Job Information:
         - Job Position: ${data?.position}
@@ -160,7 +160,7 @@ export const FormMockInterview = ({ initialData }: FormMockInterviewProps) => {
         - Years of Experience Required: ${data?.experience}
         - Tech Stacks: ${data?.techStack}
 
-        The questions should assess skills in ${data?.techStack} development and best practices, problem-solving, and experience handling complex requirements. Please format the output strictly as an array of JSON objects without any additional labels, code blocks, or explanations. Return only the JSON array with questions and answers.
+        Please format the output strictly as a single JSON array containing 7 objects, without any additional labels, code blocks, or explanations. Return only the JSON array.
         `;
 
     const aiResult = await chatSession.sendMessage(prompt);
