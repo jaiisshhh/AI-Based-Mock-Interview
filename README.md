@@ -3,7 +3,7 @@
 **AI-Based Mock Interview** is a conversational chatbot that simulates technical and behavioral interviews using AI.  
 It helps users prepare for real interviews through realistic dialogue, instant feedback, and performance insights.
 
-🌐 **LIVE LINK** : To Be Hosted
+🌐 **LIVE SITE** : [Check Out Here](https://ai-mock-interview-typesrcipt.web.app/)
 
 ---
 
